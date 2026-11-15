@@ -8,5 +8,12 @@ data class Fighter(
     val y: Float = 0f,            // altura sobre el suelo (0 = en el piso)
     val vy: Float = 0f,           // velocidad vertical
     val hp: Int = 100,
-    val state: FighterState = FighterState.IDLE
-)
+    val attackTimer: Int = 0,      // frames que le quedan al ataque
+    val hurtTimer: Int = 0,        // frames que le quedan en estado herido
+    val hitLanded: Boolean = false // evita que un solo golpe pegue varias veces
+){
+    val isAttacking get() = attackTimer > 0
+    val isHurt get() = hurtTimer > 0
+}
+
+enum class Winner { PLAYER, ENEMY }
