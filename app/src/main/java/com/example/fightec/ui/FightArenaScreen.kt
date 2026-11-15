@@ -4,7 +4,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,20 +23,36 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.fightec.R
+import com.example.fightec.entities.ArenaInfo
 import com.example.fightec.entities.AttackType
+import com.example.fightec.entities.CharacterInfo
 import com.example.fightec.entities.Fighter
 import com.example.fightec.entities.Winner
 import com.example.fightec.viewmodels.FightViewModel
+import kotlinx.coroutines.delay
 
 @Composable
-fun FightArenaScreen(vm: FightViewModel = viewModel()) {
+fun FightArenaScreen(
+    playerChar: CharacterInfo,
+    enemyChar: CharacterInfo,
+    arena: ArenaInfo,
+    onFightEnd: (playerWon: Boolean) -> Unit,
+    vm: FightViewModel = viewModel()
+) {
     val player by vm.player.collectAsState()
     val enemy by vm.enemy.collectAsState()
     val winner by vm.winner.collectAsState()
     val shake by vm.shake.collectAsState()
 
     LaunchedEffect(Unit) { vm.startFight() }
+
+    // Al terminar la pelea, deja ver la pose de victoria 2.5 s y pasa a la pantalla de resultado
+    LaunchedEffect(winner) {
+        if (winner != null) {
+            delay(2500)
+            onFightEnd(winner == Winner.PLAYER)
+        }
+    }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val unit: Dp = maxWidth / FightViewModel.WORLD_WIDTH
@@ -50,23 +65,19 @@ fun FightArenaScreen(vm: FightViewModel = viewModel()) {
                 .graphicsLayer(translationX = shakeOffset, translationY = shakeOffset / 2)
         ) {
             Image(
-                painter = painterResource(R.drawable.ed1_entrada),
+                painter = painterResource(arena.image),
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
             )
 
             FighterSprite(
-                player, enemy,
-                R.drawable.chespi_ataque, R.drawable.chespi_dano, R.drawable.chespi_win,
+                player, enemy, playerChar,
                 isWinner = winner == Winner.PLAYER, isLoser = winner == Winner.ENEMY, unit = unit
-
             )
             FighterSprite(
-                enemy, player,
-                R.drawable.oswi_qt_ataque, R.drawable.oswi_qt_dano, R.drawable.oswi_qt_win,
-                isWinner = winner == Winner.ENEMY, isLoser = winner == Winner.PLAYER, unit = unit,
-                spriteFacesRight = true
+                enemy, player, enemyChar,
+                isWinner = winner == Winner.ENEMY, isLoser = winner == Winner.PLAYER, unit = unit
             )
         }
 
@@ -85,9 +96,11 @@ fun FightArenaScreen(vm: FightViewModel = viewModel()) {
             }
         }
 
-        // Controles: izquierda (movimiento)
+        // Controles: izquierda (movimiento), un poco más hacia la derecha
         Row(
-            Modifier.align(Alignment.BottomStart).padding(start = 56.dp, top = 16.dp, end = 16.dp, bottom = 16.dp),
+            Modifier
+                .align(Alignment.BottomStart)
+                .padding(start = 56.dp, top = 16.dp, end = 16.dp, bottom = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             HoldButton("◀") { pressed -> vm.setMoveDirection(if (pressed) -1 else 0) }
@@ -96,8 +109,8 @@ fun FightArenaScreen(vm: FightViewModel = viewModel()) {
 
         // Controles: derecha (acciones)
         Row(
-            Modifier.align(Alignment.BottomEnd).padding(start = 56.dp, top = 16.dp, end = 16.dp, bottom = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            Modifier.align(Alignment.BottomEnd).padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             HoldButton("🛡") { pressed -> vm.setBlocking(pressed) }
             HoldButton("⬆") { pressed -> if (pressed) vm.jump() }
@@ -112,40 +125,32 @@ fun FightArenaScreen(vm: FightViewModel = viewModel()) {
 
         // Mensaje de fin de pelea
         if (winner != null) {
-            Column(
-                Modifier
+            Text(
+                if (winner == Winner.PLAYER) "¡GANASTE!" else "PERDISTE",
+                color = Color.White,
+                fontSize = 44.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = 50.dp)
+                    .padding(top = 60.dp)
                     .background(Color.Black.copy(alpha = 0.6f))
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    if (winner == Winner.PLAYER) "¡GANASTE!" else "PERDISTE",
-                    color = Color.White,
-                    fontSize = 36.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(Modifier.height(12.dp))
-                Button(onClick = { vm.resetFight() }) { Text("Revancha") }
-            }
+                    .padding(horizontal = 32.dp, vertical = 12.dp)
+            )
         }
     }
 }
 
 @Composable
 private fun BoxScope.FighterSprite(
-    fighter: Fighter, opponent: Fighter,
-    attackSprite: Int, hurtSprite: Int, victorySprite: Int,
-    isWinner: Boolean, isLoser: Boolean, unit: Dp,
-    spriteFacesRight: Boolean = true
+    fighter: Fighter, opponent: Fighter, character: CharacterInfo,
+    isWinner: Boolean, isLoser: Boolean, unit: Dp
 ) {
     val isFacingLeft = fighter.x > opponent.x
-    val flip = if (spriteFacesRight) isFacingLeft else !isFacingLeft
+    val flip = if (character.facesRight) isFacingLeft else !isFacingLeft
     val sprite = when {
-        isWinner -> victorySprite
-        isLoser || fighter.isHurt -> hurtSprite
-        else -> attackSprite
+        isWinner -> character.victory
+        isLoser || fighter.isHurt -> character.hurt
+        else -> character.attack
     }
     val lungeSize = when (fighter.attackType) {
         AttackType.SPECIAL -> 40f
@@ -203,5 +208,5 @@ private fun HoldButton(
                 })
             },
         contentAlignment = Alignment.Center
-    ) { Text(label, color = Color.White) }
+    ) { Text(label, color = Color.White, fontSize = 26.sp) }
 }

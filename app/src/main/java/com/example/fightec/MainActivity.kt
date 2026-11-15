@@ -13,6 +13,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import com.example.fightec.ui.theme.FighTecTheme
 import com.example.fightec.ui.FightArenaScreen
+import com.example.fightec.ui.AppNavigation
+
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -20,10 +22,9 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             FighTecTheme {
-                FightArenaScreen()
+                AppNavigation()
             }
-
-            }
+        }
         }
     }
 
