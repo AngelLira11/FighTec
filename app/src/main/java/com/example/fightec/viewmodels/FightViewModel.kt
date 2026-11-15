@@ -2,6 +2,7 @@ package com.example.fightec.viewmodels
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.fightec.entities.AttackType
 import com.example.fightec.entities.Fighter
 import com.example.fightec.entities.Winner
 import kotlinx.coroutines.Job
@@ -12,8 +13,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlin.random.Random
-
 
 class FightViewModel : ViewModel() {
 
@@ -25,18 +26,22 @@ class FightViewModel : ViewModel() {
         const val GRAVITY = 1.2f
         const val JUMP_SPEED = 20f
 
-        const val ATTACK_FRAMES = 18
         const val HURT_FRAMES = 20
-        const val ATTACK_RANGE = 110f
         const val ATTACK_HEIGHT = 60f
-        const val KNOCKBACK = 25f
 
-        const val PLAYER_DAMAGE = 10
-        const val ENEMY_DAMAGE = 8        // dificultad: súbelo para una CPU más fuerte
-        const val ENEMY_SPEED = 3.5f      // más bajo que el del jugador
-        const val ENEMY_COOLDOWN = 50     // frames entre golpes de la CPU (~0.8 s)
-        const val ENEMY_JUMP_CHANCE = 0.008f    // probabilidad por frame de saltar al acercarse
-        const val ENEMY_DODGE_CHANCE = 0.08f    // probabilidad por frame de esquivar si le atacas
+        // Bloqueo
+        const val BLOCK_DAMAGE_FACTOR = 0.2f   // el bloqueo deja pasar el 20% del daño
+        const val BLOCK_KNOCKBACK = 8f
+
+        // Dificultad de la CPU
+        const val ENEMY_DAMAGE_MULT = 0.8f
+        const val ENEMY_SPEED = 3.5f
+        const val ENEMY_COOLDOWN = 50
+        const val ENEMY_KICK_CHANCE = 0.3f
+        const val ENEMY_JUMP_CHANCE = 0.008f
+        const val ENEMY_DODGE_CHANCE = 0.08f
+        const val ENEMY_BLOCK_CHANCE = 0.06f
+        const val ENEMY_BLOCK_FRAMES = 30
     }
 
     private val _player = MutableStateFlow(Fighter(name = "Jugador", x = 150f))
@@ -49,27 +54,36 @@ class FightViewModel : ViewModel() {
     val winner = _winner.asStateFlow()
 
     private var moveDirection = 0
+    private var blockHeld = false
+    private var enemyBlockFrames = 0
     private var loopJob: Job? = null
 
     fun setMoveDirection(dir: Int) { moveDirection = dir }
+    fun setBlocking(pressed: Boolean) { blockHeld = pressed }
 
     fun jump() {
         if (_winner.value != null) return
-        _player.update { if (it.y == 0f) it.copy(vy = JUMP_SPEED) else it }
+        _player.update { if (it.y == 0f && !it.isBlocking) it.copy(vy = JUMP_SPEED) else it }
     }
 
-    fun punch() {
+    fun punch() = playerAttack(AttackType.PUNCH)
+    fun kick() = playerAttack(AttackType.KICK)
+
+    private fun playerAttack(type: AttackType) {
         if (_winner.value != null) return
         _player.update {
-            if (it.isAttacking || it.isHurt) it
-            else it.copy(attackTimer = ATTACK_FRAMES, hitLanded = false)
+            if (it.isAttacking || it.isHurt || blockHeld) it else it.startAttack(type)
         }
     }
+
+    private fun Fighter.startAttack(type: AttackType) =
+        copy(attackType = type, attackTimer = type.frames, hitLanded = false)
 
     fun resetFight() {
         _player.value = Fighter(name = "Jugador", x = 150f)
         _enemy.value = Fighter(name = "CPU", x = 600f)
         _winner.value = null
+        enemyBlockFrames = 0
     }
 
     fun startFight() {
@@ -87,31 +101,45 @@ class FightViewModel : ViewModel() {
         var e = _enemy.value
         val over = _winner.value != null
 
+        // --- Estado de bloqueo del jugador ---
+        p = p.copy(isBlocking = blockHeld && !over && !p.isAttacking && !p.isHurt && p.y == 0f)
+
         // --- IA de la CPU ---
+        if (enemyBlockFrames > 0) enemyBlockFrames--
+        e = e.copy(isBlocking = !over && enemyBlockFrames > 0 && !e.isHurt && !e.isAttacking)
+
         var enemyDir = 0
-        if (!over && !e.isHurt && !e.isAttacking) {
+        if (!over && !e.isHurt && !e.isAttacking && !e.isBlocking) {
             val dist = abs(p.x - e.x)
-            if (dist > ATTACK_RANGE * 0.8f) {
-                enemyDir = if (p.x > e.x) 1 else -1                       // acercarse
+            if (dist > AttackType.PUNCH.range * 0.8f) {
+                enemyDir = if (p.x > e.x) 1 else -1
                 if (e.y == 0f && Random.nextFloat() < ENEMY_JUMP_CHANCE) {
-                    e = e.copy(vy = JUMP_SPEED)                            // salto ocasional
+                    e = e.copy(vy = JUMP_SPEED)
                 }
-            } else if (e.y == 0f && p.isAttacking && Random.nextFloat() < ENEMY_DODGE_CHANCE) {
-                e = e.copy(vy = JUMP_SPEED)                                // esquiva saltando
-            } else if (e.cooldown == 0) {
-                e = e.copy(attackTimer = ATTACK_FRAMES, hitLanded = false, cooldown = ENEMY_COOLDOWN)
+            } else {
+                val r = Random.nextFloat()
+                if (e.y == 0f && p.isAttacking && r < ENEMY_DODGE_CHANCE) {
+                    e = e.copy(vy = JUMP_SPEED)                               // esquiva saltando
+                } else if (e.y == 0f && p.isAttacking && r < ENEMY_DODGE_CHANCE + ENEMY_BLOCK_CHANCE) {
+                    enemyBlockFrames = ENEMY_BLOCK_FRAMES                     // se cubre
+                } else if (e.cooldown == 0) {
+                    val type = if (Random.nextFloat() < ENEMY_KICK_CHANCE) AttackType.KICK else AttackType.PUNCH
+                    val extraWait = if (type == AttackType.KICK) 20 else 0
+                    e = e.startAttack(type).copy(cooldown = ENEMY_COOLDOWN + extraWait)
+                }
             }
         }
 
         // --- Física y temporizadores ---
-        p = tickTimers(applyPhysics(p, if (p.isHurt || over) 0 else moveDirection, SPEED))
+        val playerDir = if (p.isHurt || p.isBlocking || over) 0 else moveDirection
+        p = tickTimers(applyPhysics(p, playerDir, SPEED))
         e = tickTimers(applyPhysics(e, enemyDir, ENEMY_SPEED))
 
-        // --- Colisiones (golpe del jugador y golpe de la CPU) ---
+        // --- Colisiones ---
         if (!over) {
-            val (p1, e1) = landHit(p, e, PLAYER_DAMAGE)
+            val (p1, e1) = landHit(p, e, 1f)
             p = p1; e = e1
-            val (e2, p2) = landHit(e, p, ENEMY_DAMAGE)
+            val (e2, p2) = landHit(e, p, ENEMY_DAMAGE_MULT)
             e = e2; p = p2
 
             if (e.hp == 0) _winner.value = Winner.PLAYER
@@ -123,30 +151,45 @@ class FightViewModel : ViewModel() {
     }
 
     /** Devuelve (atacante, defensor) actualizados si el golpe conecta. */
-    private fun landHit(attacker: Fighter, defender: Fighter, damage: Int): Pair<Fighter, Fighter> {
+    private fun landHit(attacker: Fighter, defender: Fighter, damageMult: Float): Pair<Fighter, Fighter> {
+        val type = attacker.attackType ?: return attacker to defender
         val connects = attacker.isAttacking && !attacker.hitLanded &&
-                attacker.attackTimer in 6..12 && inRange(attacker, defender)
+                attacker.attackTimer in type.hitFrom..type.hitTo &&
+                abs(attacker.x - defender.x) < type.range &&
+                abs(attacker.y - defender.y) < ATTACK_HEIGHT
         if (!connects) return attacker to defender
 
         val dir = if (defender.x > attacker.x) 1 else -1
-        return attacker.copy(hitLanded = true) to defender.copy(
-            hp = (defender.hp - damage).coerceAtLeast(0),
-            hurtTimer = HURT_FRAMES,
-            attackTimer = 0,                                  // el golpe lo interrumpe
-            x = (defender.x + dir * KNOCKBACK).coerceIn(0f, MAX_X)
-        )
+        val fullDamage = type.damage * damageMult
+
+        return if (defender.isBlocking) {
+            // Bloqueado: daño reducido, empuje pequeño, sin estado herido
+            val damage = (fullDamage * BLOCK_DAMAGE_FACTOR).roundToInt().coerceAtLeast(1)
+            attacker.copy(hitLanded = true) to defender.copy(
+                hp = (defender.hp - damage).coerceAtLeast(0),
+                x = (defender.x + dir * BLOCK_KNOCKBACK).coerceIn(0f, MAX_X)
+            )
+        } else {
+            attacker.copy(hitLanded = true) to defender.copy(
+                hp = (defender.hp - fullDamage.roundToInt()).coerceAtLeast(0),
+                hurtTimer = HURT_FRAMES,
+                attackTimer = 0,                       // el golpe interrumpe su ataque
+                attackType = null,
+                x = (defender.x + dir * type.knockback).coerceIn(0f, MAX_X)
+            )
+        }
     }
 
-    private fun inRange(attacker: Fighter, defender: Fighter): Boolean =
-        abs(attacker.x - defender.x) < ATTACK_RANGE &&
-                abs(attacker.y - defender.y) < ATTACK_HEIGHT
-
-    private fun tickTimers(f: Fighter) = f.copy(
-        attackTimer = (f.attackTimer - 1).coerceAtLeast(0),
-        hurtTimer = (f.hurtTimer - 1).coerceAtLeast(0),
-        cooldown = (f.cooldown - 1).coerceAtLeast(0),
-        hitLanded = if (f.attackTimer <= 1) false else f.hitLanded
-    )
+    private fun tickTimers(f: Fighter): Fighter {
+        val newAttackTimer = (f.attackTimer - 1).coerceAtLeast(0)
+        return f.copy(
+            attackTimer = newAttackTimer,
+            attackType = if (newAttackTimer == 0) null else f.attackType,
+            hurtTimer = (f.hurtTimer - 1).coerceAtLeast(0),
+            cooldown = (f.cooldown - 1).coerceAtLeast(0),
+            hitLanded = if (newAttackTimer == 0) false else f.hitLanded
+        )
+    }
 
     private fun applyPhysics(f: Fighter, dir: Int, speed: Float): Fighter {
         var y = f.y + f.vy

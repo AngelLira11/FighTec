@@ -1,18 +1,31 @@
 package com.example.fightec.entities
 
-enum class FighterState { IDLE, ATTACK, HURT, VICTORY }
+/** Cada ataque define su propia duración, ventana de impacto, daño, alcance y empuje. */
+enum class AttackType(
+    val frames: Int,       // duración total
+    val hitFrom: Int,      // el golpe conecta cuando attackTimer está entre hitFrom y hitTo
+    val hitTo: Int,
+    val damage: Int,
+    val range: Float,
+    val knockback: Float
+) {
+    PUNCH(frames = 18, hitFrom = 6, hitTo = 12, damage = 10, range = 110f, knockback = 25f),
+    KICK(frames = 28, hitFrom = 10, hitTo = 18, damage = 18, range = 130f, knockback = 45f)
+}
 
 data class Fighter(
     val name: String,
-    val x: Float,                 // posición horizontal en "unidades de mundo" (0..800)
-    val y: Float = 0f,            // altura sobre el suelo (0 = en el piso)
-    val vy: Float = 0f,           // velocidad vertical
+    val x: Float,
+    val y: Float = 0f,
+    val vy: Float = 0f,
     val hp: Int = 100,
-    val attackTimer: Int = 0,      // frames que le quedan al ataque
-    val hurtTimer: Int = 0,        // frames que le quedan en estado herido
-    val cooldown: Int = 0,         // frames de espera antes de poder atacar otra vez
-    val hitLanded: Boolean = false // evita que un solo golpe pegue varias veces
-){
+    val attackTimer: Int = 0,
+    val attackType: AttackType? = null,
+    val hurtTimer: Int = 0,
+    val cooldown: Int = 0,
+    val hitLanded: Boolean = false,
+    val isBlocking: Boolean = false
+) {
     val isAttacking get() = attackTimer > 0
     val isHurt get() = hurtTimer > 0
 }
