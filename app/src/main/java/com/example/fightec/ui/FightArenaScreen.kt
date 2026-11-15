@@ -55,7 +55,8 @@ fun FightArenaScreen(vm: FightViewModel = viewModel()) {
         FighterSprite(
             enemy, player,
             R.drawable.ulloa_ataque, R.drawable.ulloa_dano, R.drawable.ulloa_win,
-            isWinner = winner == Winner.ENEMY, isLoser = winner == Winner.PLAYER, unit = unit
+            isWinner = winner == Winner.ENEMY, isLoser = winner == Winner.PLAYER, unit = unit,
+            spriteFacesRight = false
         )
 
         // Barras de vida
@@ -110,9 +111,11 @@ fun FightArenaScreen(vm: FightViewModel = viewModel()) {
 private fun BoxScope.FighterSprite(
     fighter: Fighter, opponent: Fighter,
     attackSprite: Int, hurtSprite: Int, victorySprite: Int,
-    isWinner: Boolean, isLoser: Boolean, unit: Dp
+    isWinner: Boolean, isLoser: Boolean, unit: Dp,
+    spriteFacesRight: Boolean = true      // hacia dónde mira la imagen original
 ) {
     val isFacingLeft = fighter.x > opponent.x
+    val flip = if (spriteFacesRight) isFacingLeft else !isFacingLeft
     val sprite = when {
         isWinner -> victorySprite
         isLoser || fighter.isHurt -> hurtSprite
@@ -131,7 +134,7 @@ private fun BoxScope.FighterSprite(
             .padding(bottom = 90.dp)
             .offset(x = unit * drawX, y = -(unit * fighter.y))
             .size(unit * FightViewModel.FIGHTER_WIDTH)
-            .graphicsLayer(scaleX = if (isFacingLeft) -1f else 1f)
+            .graphicsLayer(scaleX = if (flip) -1f else 1f)
     )
 }
 

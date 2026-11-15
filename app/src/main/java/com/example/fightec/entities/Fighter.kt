@@ -10,6 +10,7 @@ data class Fighter(
     val hp: Int = 100,
     val attackTimer: Int = 0,      // frames que le quedan al ataque
     val hurtTimer: Int = 0,        // frames que le quedan en estado herido
+    val cooldown: Int = 0,         // frames de espera antes de poder atacar otra vez
     val hitLanded: Boolean = false // evita que un solo golpe pegue varias veces
 ){
     val isAttacking get() = attackTimer > 0
