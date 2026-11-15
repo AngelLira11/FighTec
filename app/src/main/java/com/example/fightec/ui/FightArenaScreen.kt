@@ -35,43 +35,59 @@ fun FightArenaScreen(vm: FightViewModel = viewModel()) {
     val player by vm.player.collectAsState()
     val enemy by vm.enemy.collectAsState()
     val winner by vm.winner.collectAsState()
+    val shake by vm.shake.collectAsState()
 
     LaunchedEffect(Unit) { vm.startFight() }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val unit: Dp = maxWidth / FightViewModel.WORLD_WIDTH
 
-        Image(
-            painter = painterResource(R.drawable.postgrados),
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize()
-        )
+        // Escena (arena + luchadores): es lo que se sacude con el especial
+        val shakeOffset = if (shake > 0) (if (shake % 2 == 0) 10f else -10f) else 0f
+        Box(
+            Modifier
+                .fillMaxSize()
+                .graphicsLayer(translationX = shakeOffset, translationY = shakeOffset / 2)
+        ) {
+            Image(
+                painter = painterResource(R.drawable.ed1_entrada),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
 
-        FighterSprite(
-            player, enemy,
-            R.drawable.chespi_ataque, R.drawable.chespi_dano, R.drawable.chespi_win,
-            isWinner = winner == Winner.PLAYER, isLoser = winner == Winner.ENEMY, unit = unit
-        )
-        FighterSprite(
-            enemy, player,
-            R.drawable.oswi_qt_ataque, R.drawable.oswi_qt_dano, R.drawable.oswi_qt_win,
-            isWinner = winner == Winner.ENEMY, isLoser = winner == Winner.PLAYER, unit = unit,
-            spriteFacesRight = true
-        )
+            FighterSprite(
+                player, enemy,
+                R.drawable.chespi_ataque, R.drawable.chespi_dano, R.drawable.chespi_win,
+                isWinner = winner == Winner.PLAYER, isLoser = winner == Winner.ENEMY, unit = unit
 
-        // Barras de vida
+            )
+            FighterSprite(
+                enemy, player,
+                R.drawable.oswi_qt_ataque, R.drawable.oswi_qt_dano, R.drawable.oswi_qt_win,
+                isWinner = winner == Winner.ENEMY, isLoser = winner == Winner.PLAYER, unit = unit,
+                spriteFacesRight = true
+            )
+        }
+
+        // Barras de vida y energía
         Row(
             Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(12.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            HpBar(player.hp, Modifier.weight(1f))
-            HpBar(enemy.hp, Modifier.weight(1f))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                StatBar(player.hp, Color.Red, 16.dp)
+                StatBar(player.energy, Color(0xFFFFC107), 8.dp)
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                StatBar(enemy.hp, Color.Red, 16.dp)
+                StatBar(enemy.energy, Color(0xFFFFC107), 8.dp)
+            }
         }
 
         // Controles: izquierda (movimiento)
         Row(
-            Modifier.align(Alignment.BottomStart).padding(16.dp),
+            Modifier.align(Alignment.BottomStart).padding(start = 56.dp, top = 16.dp, end = 16.dp, bottom = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             HoldButton("◀") { pressed -> vm.setMoveDirection(if (pressed) -1 else 0) }
@@ -80,13 +96,18 @@ fun FightArenaScreen(vm: FightViewModel = viewModel()) {
 
         // Controles: derecha (acciones)
         Row(
-            Modifier.align(Alignment.BottomEnd).padding(16.dp),
+            Modifier.align(Alignment.BottomEnd).padding(start = 56.dp, top = 16.dp, end = 16.dp, bottom = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             HoldButton("🛡") { pressed -> vm.setBlocking(pressed) }
             HoldButton("⬆") { pressed -> if (pressed) vm.jump() }
             HoldButton("👊") { pressed -> if (pressed) vm.punch() }
             HoldButton("🦶") { pressed -> if (pressed) vm.kick() }
+            HoldButton(
+                "⭐",
+                background = if (player.energy >= FightViewModel.MAX_ENERGY)
+                    Color(0xFFFFC107).copy(alpha = 0.9f) else Color.Black.copy(alpha = 0.5f)
+            ) { pressed -> if (pressed) vm.special() }
         }
 
         // Mensaje de fin de pelea
@@ -126,13 +147,19 @@ private fun BoxScope.FighterSprite(
         isLoser || fighter.isHurt -> hurtSprite
         else -> attackSprite
     }
-    val lungeSize = if (fighter.attackType == AttackType.KICK) 25f else 15f
+    val lungeSize = when (fighter.attackType) {
+        AttackType.SPECIAL -> 40f
+        AttackType.KICK -> 25f
+        else -> 15f
+    }
     val lunge = if (fighter.isAttacking) (if (isFacingLeft) -lungeSize else lungeSize) else 0f
     val drawX = (fighter.x + lunge).coerceIn(0f, FightViewModel.MAX_X)
 
     val tint = when {
         fighter.isHurt -> ColorFilter.tint(Color.Red.copy(alpha = 0.4f), BlendMode.SrcAtop)
         fighter.isBlocking -> ColorFilter.tint(Color(0xFF3399FF).copy(alpha = 0.45f), BlendMode.SrcAtop)
+        fighter.attackType == AttackType.SPECIAL ->
+            ColorFilter.tint(Color(0xFFFFC107).copy(alpha = 0.4f), BlendMode.SrcAtop)
         else -> null
     }
 
@@ -151,18 +178,23 @@ private fun BoxScope.FighterSprite(
 }
 
 @Composable
-private fun HpBar(hp: Int, modifier: Modifier = Modifier) {
-    Box(modifier.height(16.dp).background(Color.DarkGray)) {
-        Box(Modifier.fillMaxHeight().fillMaxWidth(hp / 100f).background(Color.Red))
+private fun StatBar(value: Int, color: Color, height: Dp, modifier: Modifier = Modifier) {
+    Box(modifier.fillMaxWidth().height(height).background(Color.DarkGray)) {
+        Box(Modifier.fillMaxHeight().fillMaxWidth(value / 100f).background(color))
     }
 }
 
 @Composable
-private fun HoldButton(label: String, modifier: Modifier = Modifier, onPress: (Boolean) -> Unit) {
+private fun HoldButton(
+    label: String,
+    modifier: Modifier = Modifier,
+    background: Color = Color.Black.copy(alpha = 0.5f),
+    onPress: (Boolean) -> Unit
+) {
     Box(
         modifier = modifier
-            .size(60.dp)
-            .background(Color.Black.copy(alpha = 0.5f))
+            .size(72.dp)
+            .background(background)
             .pointerInput(Unit) {
                 detectTapGestures(onPress = {
                     onPress(true)

@@ -30,8 +30,15 @@ class FightViewModel : ViewModel() {
         const val ATTACK_HEIGHT = 60f
 
         // Bloqueo
-        const val BLOCK_DAMAGE_FACTOR = 0.2f   // el bloqueo deja pasar el 20% del daño
+        const val BLOCK_DAMAGE_FACTOR = 0.2f
         const val BLOCK_KNOCKBACK = 8f
+
+        // Energía del especial
+        const val MAX_ENERGY = 100
+        const val ENERGY_ON_HIT = 12        // al conectar un golpe
+        const val ENERGY_ON_HURT = 8        // al recibir un golpe
+        const val ENERGY_ON_BLOCK = 4       // al bloquear un golpe
+        const val SHAKE_FRAMES = 14
 
         // Dificultad de la CPU
         const val ENEMY_DAMAGE_MULT = 0.8f
@@ -53,9 +60,13 @@ class FightViewModel : ViewModel() {
     private val _winner = MutableStateFlow<Winner?>(null)
     val winner = _winner.asStateFlow()
 
+    private val _shake = MutableStateFlow(0)      // frames restantes de sacudida
+    val shake = _shake.asStateFlow()
+
     private var moveDirection = 0
     private var blockHeld = false
     private var enemyBlockFrames = 0
+    private var pendingShake = false
     private var loopJob: Job? = null
 
     fun setMoveDirection(dir: Int) { moveDirection = dir }
@@ -68,6 +79,14 @@ class FightViewModel : ViewModel() {
 
     fun punch() = playerAttack(AttackType.PUNCH)
     fun kick() = playerAttack(AttackType.KICK)
+
+    fun special() {
+        if (_winner.value != null) return
+        _player.update {
+            if (it.isAttacking || it.isHurt || blockHeld || it.energy < MAX_ENERGY) it
+            else it.startAttack(AttackType.SPECIAL).copy(energy = 0)
+        }
+    }
 
     private fun playerAttack(type: AttackType) {
         if (_winner.value != null) return
@@ -83,7 +102,9 @@ class FightViewModel : ViewModel() {
         _player.value = Fighter(name = "Jugador", x = 150f)
         _enemy.value = Fighter(name = "CPU", x = 600f)
         _winner.value = null
+        _shake.value = 0
         enemyBlockFrames = 0
+        pendingShake = false
     }
 
     fun startFight() {
@@ -119,13 +140,20 @@ class FightViewModel : ViewModel() {
             } else {
                 val r = Random.nextFloat()
                 if (e.y == 0f && p.isAttacking && r < ENEMY_DODGE_CHANCE) {
-                    e = e.copy(vy = JUMP_SPEED)                               // esquiva saltando
+                    e = e.copy(vy = JUMP_SPEED)
                 } else if (e.y == 0f && p.isAttacking && r < ENEMY_DODGE_CHANCE + ENEMY_BLOCK_CHANCE) {
-                    enemyBlockFrames = ENEMY_BLOCK_FRAMES                     // se cubre
+                    enemyBlockFrames = ENEMY_BLOCK_FRAMES
                 } else if (e.cooldown == 0) {
-                    val type = if (Random.nextFloat() < ENEMY_KICK_CHANCE) AttackType.KICK else AttackType.PUNCH
-                    val extraWait = if (type == AttackType.KICK) 20 else 0
-                    e = e.startAttack(type).copy(cooldown = ENEMY_COOLDOWN + extraWait)
+                    val type = when {
+                        e.energy >= MAX_ENERGY -> AttackType.SPECIAL
+                        Random.nextFloat() < ENEMY_KICK_CHANCE -> AttackType.KICK
+                        else -> AttackType.PUNCH
+                    }
+                    val extraWait = if (type == AttackType.PUNCH) 0 else 20
+                    e = e.startAttack(type).copy(
+                        cooldown = ENEMY_COOLDOWN + extraWait,
+                        energy = if (type == AttackType.SPECIAL) 0 else e.energy
+                    )
                 }
             }
         }
@@ -146,6 +174,14 @@ class FightViewModel : ViewModel() {
             else if (p.hp == 0) _winner.value = Winner.ENEMY
         }
 
+        // --- Sacudida de pantalla ---
+        if (pendingShake) {
+            _shake.value = SHAKE_FRAMES
+            pendingShake = false
+        } else if (_shake.value > 0) {
+            _shake.value -= 1
+        }
+
         _player.value = p
         _enemy.value = e
     }
@@ -159,21 +195,30 @@ class FightViewModel : ViewModel() {
                 abs(attacker.y - defender.y) < ATTACK_HEIGHT
         if (!connects) return attacker to defender
 
+        if (type == AttackType.SPECIAL) pendingShake = true
+
         val dir = if (defender.x > attacker.x) 1 else -1
         val fullDamage = type.damage * damageMult
+        // el especial no recarga energía a quien lo lanza
+        val attackerGain = if (type == AttackType.SPECIAL) 0 else ENERGY_ON_HIT
+        val newAttacker = attacker.copy(
+            hitLanded = true,
+            energy = (attacker.energy + attackerGain).coerceAtMost(MAX_ENERGY)
+        )
 
         return if (defender.isBlocking) {
-            // Bloqueado: daño reducido, empuje pequeño, sin estado herido
             val damage = (fullDamage * BLOCK_DAMAGE_FACTOR).roundToInt().coerceAtLeast(1)
-            attacker.copy(hitLanded = true) to defender.copy(
+            newAttacker to defender.copy(
                 hp = (defender.hp - damage).coerceAtLeast(0),
+                energy = (defender.energy + ENERGY_ON_BLOCK).coerceAtMost(MAX_ENERGY),
                 x = (defender.x + dir * BLOCK_KNOCKBACK).coerceIn(0f, MAX_X)
             )
         } else {
-            attacker.copy(hitLanded = true) to defender.copy(
+            newAttacker to defender.copy(
                 hp = (defender.hp - fullDamage.roundToInt()).coerceAtLeast(0),
+                energy = (defender.energy + ENERGY_ON_HURT).coerceAtMost(MAX_ENERGY),
                 hurtTimer = HURT_FRAMES,
-                attackTimer = 0,                       // el golpe interrumpe su ataque
+                attackTimer = 0,
                 attackType = null,
                 x = (defender.x + dir * type.knockback).coerceIn(0f, MAX_X)
             )

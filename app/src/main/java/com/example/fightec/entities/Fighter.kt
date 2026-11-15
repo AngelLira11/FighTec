@@ -10,7 +10,8 @@ enum class AttackType(
     val knockback: Float
 ) {
     PUNCH(frames = 18, hitFrom = 6, hitTo = 12, damage = 10, range = 110f, knockback = 25f),
-    KICK(frames = 28, hitFrom = 10, hitTo = 18, damage = 18, range = 130f, knockback = 45f)
+    KICK(frames = 28, hitFrom = 10, hitTo = 18, damage = 18, range = 130f, knockback = 45f),
+    SPECIAL(frames = 40, hitFrom = 14, hitTo = 24, damage = 30, range = 170f, knockback = 80f)
 }
 
 data class Fighter(
@@ -19,6 +20,7 @@ data class Fighter(
     val y: Float = 0f,
     val vy: Float = 0f,
     val hp: Int = 100,
+    val energy: Int = 0,               // 0..100, se llena al pelear
     val attackTimer: Int = 0,
     val attackType: AttackType? = null,
     val hurtTimer: Int = 0,
